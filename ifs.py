@@ -1,22 +1,21 @@
 #! /usr/bin/env python3
 
 """
-Infinmport threading
-ite Fun Space
+Infinite Fun Space
 
 Tri-Peter Shrive
 tri.shrive@gmail.com
 
 TODO:
 	* gravity,
-	* friction,
-	* guidance (should compensate for gravity),
+	* drag,
+	* guidance (should compensate for external forces),
 	* collision detection,
 	* radar,
 	* infra-red,
+	* sonar,
 	* database,
 	* web sockets,
-	* ships
 """
 
 import curses
