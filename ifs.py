@@ -66,11 +66,13 @@ class Piece:
 	"""
 	def __init__(
 		self,
+		piece_id: int,
 		Framework: Framework,
 		position: np.array
 		):
 		"""
 		"""
+		self.piece_id = piece_id
 		self.position = position
 		self.Framework = Framework
 		self.has_destination = False
@@ -96,6 +98,7 @@ class Rocket(Piece):
 	"""
 	def __init__(
 		self,
+		piece_id: int,
 		Framework: Framework,
 		position: np.array,
 		speed: np.array,
@@ -108,6 +111,7 @@ class Rocket(Piece):
 		"""
 		Piece.__init__(
 			self,
+			piece_id,
 			Framework,
 			position
 			)
@@ -125,6 +129,15 @@ class Rocket(Piece):
 		self
 		) -> None:
 		"""
+		"""
+		self.new_Position()
+		for piece in Framework.pieces_List:
+			self.collision_Detection(piece)
+
+	def new_Position(
+		self
+		) -> None:
+		"""
 		Newtons method.
 		Should use RK4.
 		"""
@@ -134,22 +147,36 @@ class Rocket(Piece):
 		self.acceleration = self.thrust / float(self.mass)
 		# do we have a destination?
 		if(True == self.has_destination):
-			direction = self.destination - self.position
-			sum_direction = np.sum(np.abs(direction))
+			self.direction = self.destination - self.position
+			sum_direction = np.sum(np.abs(self.direction))
 			if(0 < sum_direction):
 				# unit vector
-				self.direction = direction / float(sum_direction)
+				self.direction = self.direction / float(sum_direction)
 				# do we still have fule?
 				if(self.mass > self.final_mass):
 					self.speed = self.speed + self.direction * self.acceleration
 					self.mass = self.mass - self.mass_flow_rate
 		self.position = self.position + self.speed
 
+	def collision_Detection(
+		self,
+		piece: Piece
+		) -> None:
+		"""
+		if ( x-cx )^2 + (y-cy)^2 + (z-cz)^ 2 < r^2 
+		"""
+		blast_radius = 0.001
+		kill = (self.position[0] - piece.position[0])^2 + (self.position[1] - piece.position[1])^2 + (self.position[2] - piece.position[2])^2 < blast_radius^2
+		logger.debug("kill: {}".format(kill))
+		if(piece.piece_id != self.piece_id):
+			pass
+
 class Radar(Piece):
 	"""
 	"""
 	def __init__(
 		self,
+		piece_id: int,
 		Framework: Framework,
 		position: np.array,
 		):
@@ -157,6 +184,7 @@ class Radar(Piece):
 		"""
 		Piece.__init__(
 			self,
+			piece_id,
 			Framework,
 			position
 			)
@@ -167,13 +195,19 @@ class Radar(Piece):
 		) -> None:
 		"""
 		"""
-		logger.debug(self.position)
 		self.visible_pieces = list()
 		for piece in self.Framework.pieces_List:
-			if(self.is_Visible(piece)):
-				self.visible_pieces.append(piece)
-				logger.debug("self: {}".format(self.position))
-				logger.debug("visible: {}".format(piece.position))
+			if(self.piece_id != piece.piece_id):
+				if(self.is_Visible(piece)):
+					self.visible_pieces.append(piece)
+					logger.debug("self.piece_id: {} self.position: {} sees piece.position: {}".format(self.piece_id, self.position, piece.position))
+				else:
+					logger.debug("self.piece_id: {} self.position: {} does NOT see piece.position: {}".format(self.piece_id, self.position, piece.position))
+					
+#		for each enemy 
+#			launch rockets
+#		for each rocket
+#			update rocket
 
 	def is_Visible(
 		self,
@@ -185,7 +219,7 @@ class Radar(Piece):
 		earth_radius = 6371
 		radar_height = 0.001
 
-		radar_position = self.position
+		radar_position = np.array(self.position, dtype = np.float64)
 		radar_position[2] = radar_position[2] + radar_height
 
 		distance = np.linalg.norm(piece.position - radar_position)
@@ -208,22 +242,31 @@ class Ship(Piece):
 	"""
 	def __init__(
 		self,
+		piece_id: int,
 		Framework: Framework,
 		position: np.array,
 		speed: np.array,
-		rockets: list = list()
+		acceleration: np.float64 = 0.001,
+		top_speed: np.float64 = 0.01,
+		num_rockets: np.int64 = 3
 		):
 		"""
 		Carries radars and rockets over seas.
 		"""
 		Piece.__init__(
 			self,
+			piece_id,
 			Framework,
 			position
 			)
 		self.speed = speed
-		self.rockets = rockets
+		self.top_speed = top_speed
+		self.acceleration = acceleration
+
+#		rockets?
+
 		self.radar = Radar(
+				piece_id,
 				Framework,
 				position
 				)
@@ -234,6 +277,20 @@ class Ship(Piece):
 		"""
 		"""
 		self.radar.update()
+
+		# do we have a destination?
+		if(True == self.has_destination):
+			self.direction = self.destination - self.position
+			sum_direction = np.sum(np.abs(self.direction))
+			if(0 < sum_direction):
+				# unit vector
+				if(np.linalg.norm(self.speed) < self.top_speed):
+					self.speed = self.speed + self.direction * self.acceleration
+				else:
+					self.speed = self.direction * self.top_speed
+
+		self.position = self.position + self.speed
+		self.radar.position = self.position
 
 class System:
 	"""
@@ -321,12 +378,7 @@ class Interface(System):
 		) -> None:
 		"""
 		"""
-		if(Message.add == Msg):
-			self.add(args)
-		elif(Message.move_Order == Msg):
-			self.move_Order(args)
-		else:
-			pass
+		pass
 
 	def open_Window(
 		self
@@ -407,16 +459,8 @@ class Interface(System):
 		) -> None:
 		"""
 		"""
-		old_x = int(args[0])
-		old_y = int(args[1])
-		old_z = int(args[2])
-
-		new_x = int(args[3])
-		new_y = int(args[4])
-		new_z = int(args[5])
-		
-		piece_ID = Framework.board_Map[old_x, old_y, old_z]
-		destination = np.array((new_x, new_y, new_z), dtype = int)
+		piece_ID = Framework.board_Map[int(args[0]), int(args[1]), int(args[2])]
+		destination = np.array((int(args[3]), int(args[4]), int(args[5])), dtype = int)
 		Framework.pieces_List[piece_ID].move_Order(destination)
 
 	def add(
@@ -451,7 +495,11 @@ class Logic(System):
 		) -> None:
 		"""
 		"""
-		if(Message.update_Board == Msg):
+		if(Message.add == Msg):
+			self.add(args)
+		elif(Message.move_Order == Msg):
+			self.move_Order(args)
+		elif(Message.update_Board == Msg):
 			self.update_Board()
 		elif(Message.update_Piece == Msg):
 			self.update_Piece(args)
@@ -474,6 +522,35 @@ class Logic(System):
 		"""
 		piece.update()
 
+	def move_Order(
+		self,
+		args
+		) -> None:
+		"""
+		"""
+		old_x = int(args[0])
+		old_y = int(args[1])
+		old_z = int(args[2])
+
+		new_coords = args[3:6]
+		
+		piece_ID = Framework.board_Map[old_x, old_y, old_z]
+		destination = np.array((new_coords), dtype = np.float64)
+		Framework.pieces_List[piece_ID].move_Order(destination)
+
+	def add(
+		self,
+		args
+		) -> None:
+		"""
+		"""
+		position = np.array((args[0], args[1], args[2]), dtype = np.float64)
+		speed = np.array((args[3], args[4], args[5]), dtype = np.float64)
+	
+		Framework.pieces_List.append(Ship(Framework.next_ID, Framework, position, speed))
+		Framework.board_Map[int(args[0]), int(args[1]), int(args[2])] = Framework.next_ID
+		Framework.next_ID = Framework.next_ID + 1
+		
 if(__name__ == "__main__"):
 	Framework = Framework()
 	Queue = queue.Queue(maxsize = 0)
@@ -481,6 +558,7 @@ if(__name__ == "__main__"):
 	Interface = Interface(Framework, Queue)
 	Message_Bus = Message_Bus(Framework, Queue, [Logic, Interface])
 	Message_Bus.post_Message(Message.add, [1, 8, 0, 0, 0, 0])
+	Message_Bus.post_Message(Message.move_Order, [1, 8, 0, 7, 2, 0])
 	Message_Bus.post_Message(Message.add, [8, 1, 0, 0, 0, 0])
 	Queue.join()
 	Interface.open_Window()
