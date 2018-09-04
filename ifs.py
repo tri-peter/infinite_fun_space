@@ -182,17 +182,21 @@ class Radar(Piece):
 		"""
 		Line of sight.
 		"""
-		distance = np.linalg.norm(piece.position[:2] - self.position[:2])
-
-		piece_height = piece.position[2]
-		self_height =  self.position[2]
-
 		earth_radius = 6371
 		radar_height = 0.001
-		piece_horizon = np.sqrt(2 * earth_radius * piece_height)
-		self_horizon = np.sqrt(2 * earth_radius * (self_height + radar_height) + (self_height + radar_height)**2)
 
-		if(distance < piece_horizon + self_horizon):
+		radar_position = self.position
+		radar_position[2] = radar_position[2] + radar_height
+
+		distance = np.linalg.norm(piece.position - radar_position)
+
+		piece_height = piece.position[2]
+		radar_height = radar_position[2]
+
+		piece_horizon = np.sqrt(2 * earth_radius * piece_height)
+		radar_horizon = np.sqrt(2 * earth_radius * radar_height + radar_height**2)
+
+		if(distance < piece_horizon + radar_horizon):
 			is_visible = True
 		else:
 			is_visible = False
