@@ -129,9 +129,11 @@ class Rocket(Piece):
 		) -> None:
 		"""
 		"""
+		logger.debug("rocket in flight")
 		self.new_Position()
 		for piece in Framework.pieces_List:
-			self.collision_Detection(piece)
+			if(piece.piece_id != self.piece_id):
+				self.collision_Detection(piece)
 
 	def new_Position(
 		self
@@ -164,8 +166,10 @@ class Rocket(Piece):
 		"""
 		if ( x-cx )^2 + (y-cy)^2 + (z-cz)^ 2 < r^2 
 		"""
-		blast_radius = 0.001
-		kill = (self.position[0] - piece.position[0])^2 + (self.position[1] - piece.position[1])^2 + (self.position[2] - piece.position[2])^2 < blast_radius^2
+		blast_radius = 0.5
+		logger.debug("rocket {} position {}".format(self.piece_id, self.position))
+		logger.debug("target {} position {}".format(piece.piece_id, piece.position))
+		kill = np.power((self.position[0] - piece.position[0]), 2) + np.power((self.position[1] - piece.position[1]), 2) + np.power((self.position[2] - piece.position[2]), 2) < np.power(blast_radius, 2)
 		logger.debug("kill: {}".format(kill))
 		if(piece.piece_id != self.piece_id):
 			pass
@@ -178,6 +182,7 @@ class Radar(Piece):
 		piece_id: int,
 		Framework: Framework,
 		position: np.array,
+		speed: np.array
 		):
 		"""
 		"""
@@ -188,6 +193,9 @@ class Radar(Piece):
 			position
 			)
 		self.visible_pieces = list()
+		self.speed = speed
+		self.rocket_list = list()
+		self.total_rockets = 1
 
 	def update(
 		self
@@ -199,14 +207,22 @@ class Radar(Piece):
 			if(self.piece_id != piece.piece_id):
 				if(self.is_Visible(piece)):
 					self.visible_pieces.append(piece)
-					logger.debug("self.piece_id: {} self.position: {} sees piece.position: {}".format(self.piece_id, self.position, piece.position))
-				else:
-					logger.debug("self.piece_id: {} self.position: {} does NOT see piece.position: {}".format(self.piece_id, self.position, piece.position))
-					
-#		for each enemy 
-#			launch rockets
-#		for each rocket
-#			update rocket
+
+		for piece in self.visible_pieces:
+			if(0 < self.total_rockets):
+				logger.debug("launching rocket")
+				rocket = Rocket(
+					self.piece_id,
+					self.Framework,
+					self.position,
+					self.speed
+					)
+				rocket.move_Order(piece.position)
+				self.rocket_list.append(rocket)
+			self.total_rockets = self.total_rockets - 1
+
+		for rocket in self.rocket_list:
+			rocket.update()
 
 	def is_Visible(
 		self,
@@ -262,12 +278,11 @@ class Ship(Piece):
 		self.top_speed = top_speed
 		self.acceleration = acceleration
 
-#		rockets?
-
 		self.radar = Radar(
 				piece_id,
 				Framework,
-				position
+				position,
+				speed
 				)
 
 	def update(
@@ -290,6 +305,7 @@ class Ship(Piece):
 
 		self.position = self.position + self.speed
 		self.radar.position = self.position
+		self.radar.speed = self.speed
 
 class System:
 	"""
@@ -449,6 +465,8 @@ class Interface(System):
 			stdscr.addstr(2, 4 * i + 3, str(i))
 		for piece in Framework.pieces_List:
 			stdscr.addstr(2 * int(np.rint(piece.position[1])) + 3, 4 * int(np.rint(piece.position[0])) + 3, "X" + str(int(np.rint(piece.position[2]))))
+			#draw missiles
+
 		window_size = stdscr.getmaxyx()
 		stdscr.move(window_size[0] - 1, 0)
 
