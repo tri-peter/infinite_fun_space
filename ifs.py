@@ -7,11 +7,11 @@ Tri-Peter Shrive
 tri.shrive@gmail.com
 
 TODO:
-	* gravity,
-	* drag,
-	* guidance (should compensate for external forces),
-	* collision detection,
-	* radar,
+	* add external forces  (gravity, drag, etc.)
+	* improve guidance (should compensate for external forces),
+	* improve collision detection,
+	* list of friendlies,
+	* remove piece when killed,
 	* infra-red,
 	* sonar,
 	* database,
@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 @enum.unique
 class Message(enum.Enum):
 	"""
+	Valid messages for sent between systems via the message bus.
 	"""
 	open_Window = 0
 	add = 1
@@ -46,6 +47,7 @@ class Message(enum.Enum):
 
 class Framework():
 	"""
+	Encapsulates data shared by the systems and provides locking mechanism.
 	"""
 	def __init__(
 		self,
@@ -64,6 +66,7 @@ class Framework():
 	
 class Piece:
 	"""
+	Basic board piece.
 	"""
 	def __init__(
 		self,
@@ -72,17 +75,19 @@ class Piece:
 		position: np.array
 		):
 		"""
+		Set initial piece data and reference framework for future reference to shared data.
 		"""
 		self.piece_id = piece_id
 		self.position = position
-		self.Framework = Framework
 		self.has_destination = False
+		self.Framework = Framework
 
 	def move_Order(
 		self,
 		destination: np.array
 		) -> None:
 		"""
+		Set destination used when updating piece.
 		"""
 		self.destination = destination
 		self.has_destination = True 
@@ -91,11 +96,14 @@ class Piece:
 		self
 		) -> None:
 		"""
+		Basic piece does nothing.
 		"""
 		pass
 
 class Rocket(Piece):
 	"""
+	The rocket piece. Is fired by radar and then moves to target.
+	At the moment rockets are fire and forget with no retargeting if target moves.
 	"""
 	def __init__(
 		self,
@@ -109,6 +117,7 @@ class Rocket(Piece):
 		mass_flow_rate: np.float64 = 0.001
 		):
 		"""
+		Set piece data and additional rocket specific data.
 		"""
 		Piece.__init__(
 			self,
@@ -122,17 +131,16 @@ class Rocket(Piece):
 		self.exit_velocity = exit_velocity
 		self.mass_flow_rate = mass_flow_rate
 
-		total_speed = np.sum(np.abs(self.speed))
-		if(0 < total_speed):
-			self.direction = self.speed / float(total_speed)
-
 	def update(
 		self
 		) -> None:
 		"""
+		Update rocket position and check for collision with target.
+		Currently targets anything but the piece that launched it...
 		"""
 		self.new_Position()
 		for piece in Framework.pieces_List:
+			# TODO: list of friendlies
 			if(piece.piece_id != self.piece_id):
 				self.collision_Detection(piece)
 
@@ -140,8 +148,10 @@ class Rocket(Piece):
 		self
 		) -> None:
 		"""
-		Newtons method.
-		Should use RK4.
+		Uses Newtons method to update rocket position.
+		Should use Runga-Kutta 4th order method.
+
+		Rocket has variable mass. Acceleration increases as mass decreases.
 		"""
 		self.thrust = self.exit_velocity * self.mass_flow_rate
 		assert(0 < self.mass_flow_rate)
@@ -165,7 +175,7 @@ class Rocket(Piece):
 		piece: Piece
 		) -> None:
 		"""
-		if ( x-cx )^2 + (y-cy)^2 + (z-cz)^ 2 < r^2 
+		Check if piece is inside blast radius centered at rockets location.
 		"""
 		blast_radius = 0.5
 		logger.debug("rocket {} position {}".format(self.piece_id, self.position))
@@ -177,6 +187,7 @@ class Rocket(Piece):
 
 class Radar(Piece):
 	"""
+	The radar piece. Detects enemy ships and fires rockets at them.
 	"""
 	def __init__(
 		self,
@@ -186,6 +197,7 @@ class Radar(Piece):
 		speed: np.array
 		):
 		"""
+		Set piece data and additional radar specific data.
 		"""
 		Piece.__init__(
 			self,
@@ -202,9 +214,12 @@ class Radar(Piece):
 		self
 		) -> None:
 		"""
+		Update launched rocket and list of visible pieces.
+		Launch rockets at visible pieces if rockets are available.
 		"""
 		self.visible_pieces = list()
 		for piece in self.Framework.pieces_List:
+			# TODO: list of friendlies
 			if(self.piece_id != piece.piece_id):
 				if(self.is_Visible(piece)):
 					self.visible_pieces.append(piece)
@@ -229,9 +244,11 @@ class Radar(Piece):
 		piece: Piece
 		) -> bool:
 		"""
-		Line of sight.
+		Check for line of sight. Only takes horizon into account.
 		"""
-		earth_radius = 6371
+		# TODO: check for hills
+		# TODO: check radar sensitivity against targets radar-cross-section
+		planet_radius = 6371
 		radar_height = 0.005
 
 		radar_position = np.array(self.position, dtype = np.float64)
@@ -242,8 +259,8 @@ class Radar(Piece):
 		piece_height = piece.position[2]
 		radar_height = radar_position[2]
 
-		piece_horizon = np.sqrt(2 * earth_radius * piece_height)
-		radar_horizon = np.sqrt(2 * earth_radius * radar_height + radar_height**2)
+		piece_horizon = np.sqrt(2 * planet_radius * piece_height)
+		radar_horizon = np.sqrt(2 * planet_radius * radar_height + radar_height**2)
 
 		if(distance < piece_horizon + radar_horizon):
 			is_visible = True
@@ -254,6 +271,7 @@ class Radar(Piece):
 
 class Ship(Piece):
 	"""
+	The ship piece. Transports radar and rockets.
 	"""
 	def __init__(
 		self,
@@ -263,7 +281,6 @@ class Ship(Piece):
 		speed: np.array,
 		acceleration: np.float64 = 0.0001,
 		top_speed: np.float64 = 0.001,
-		num_rockets: np.int64 = 3
 		):
 		"""
 		Carries radars and rockets over seas.
@@ -285,16 +302,19 @@ class Ship(Piece):
 				speed
 				)
 
-	def update(
+	def new_Position(
 		self
 		) -> None:
 		"""
+		Uses Newtons method to update rocket position.
+		Should use Runga-Kutta 4th order method.
+
+		Ship acceleration is constant.
+		Ship has a top speed.
 		"""
 		temp_x = int(self.position[0])
 		temp_y = int(self.position[1])
 		temp_z = int(self.position[2]) 
-
-		self.radar.update()
 
 		# do we have a destination?
 		if(True == self.has_destination):
@@ -308,14 +328,25 @@ class Ship(Piece):
 					self.speed = self.direction * self.top_speed
 
 		self.position = self.position + self.speed
-		self.radar.position = self.position
-		self.radar.speed = self.speed
-
 		with Framework.lock:
 			self.Framework.board_Map[temp_x, temp_y, temp_z] = -1
 			self.Framework.board_Map[int(self.position[0]), int(self.position[1]), int(self.position[2])] = self.piece_id 
+
+	def update(
+		self
+		) -> None:
+		"""
+		Update ship and radar position.
+		Update radar and associated rockets. 
+		"""
+		self.new_Position
+		self.radar.position = self.position
+		self.radar.speed = self.speed
+		self.radar.update()
+
 class System:
 	"""
+	Basic system.
 	"""
 	def __init__(
 		self,
@@ -323,6 +354,7 @@ class System:
 		Queue: queue.Queue
 		):
 		"""
+		Set threading queue and framework for later use.
 		"""
 		self.Queue = Queue
 		self.Framwork = Framework
@@ -333,6 +365,8 @@ class System:
 		args: list = None
 		) -> None:
 		"""
+		Post a message via the message bus.
+		Uses a queue to allocate tasks to threads.
 		"""
 		self.Queue.put((Msg, args))
 		
@@ -342,11 +376,14 @@ class System:
 		args: list = None
 		) -> None:
 		"""
+		Handle a message from the message bus.
+		Here all messages are ignored.
 		"""
 		pass
 
 class Message_Bus(System):
 	"""
+	Passes messages between systems.
 	"""
 	def __init__(
 		self,
@@ -356,6 +393,8 @@ class Message_Bus(System):
 		num_threads: int = 4
 		):
 		"""
+		Initialise the basic system and set callback systems.
+		Callback systems are those that recieve messages.
 		"""
 		System.__init__(self, Framework, Queue)
 		self.callbacks = callbacks
@@ -372,6 +411,7 @@ class Message_Bus(System):
 		Queue: queue.Queue
 		) -> None:
 		"""
+		Get messages directly from the queue and pass them on to the callback systems.
 		"""
 		while(True):
 			item = Queue.get()
@@ -383,6 +423,7 @@ class Message_Bus(System):
 
 class Interface(System):
 	"""
+	Curses graphical user interface.
 	"""
 	def __init__(
 		self,
@@ -390,6 +431,7 @@ class Interface(System):
 		Queue
 		):
 		"""
+		Initialise the basic system.
 		"""
 		System.__init__(self, Framework, Queue)
 
@@ -399,6 +441,7 @@ class Interface(System):
 		args: list = None
 		) -> None:
 		"""
+		Ignore all messages.
 		"""
 		pass
 
@@ -406,6 +449,7 @@ class Interface(System):
 		self
 		) -> None:
 		"""
+		Start the curses window.
 		"""
 		curses.wrapper(self.run)
 
@@ -414,6 +458,7 @@ class Interface(System):
 		stdscr
 		) -> None:
 		"""
+		The game loop.
 		"""
 		key = ""
 		while(True):
@@ -464,6 +509,7 @@ class Interface(System):
 		stdscr
 		) -> None:
 		"""
+		Draw the game board and add pieces.
 		"""
 		stdscr.addstr("Infinite Fun Space 0.1")
 		for i in range(Framework.max_y):
@@ -498,34 +544,9 @@ class Interface(System):
 		window_size = stdscr.getmaxyx()
 		stdscr.move(window_size[0] - 1, 0)
 
-	def move_Order(
-		self,
-		args
-		) -> None:
-		"""
-		"""
-		with(Framework.lock):
-			piece_ID = Framework.board_Map[int(args[0]), int(args[1]), int(args[2])]
-		destination = np.array((int(args[3]), int(args[4]), int(args[5])), dtype = int)
-		if(-1 < piece_ID):
-			Framework.pieces_List[piece_ID].move_Order(destination)
-
-	def add(
-		self,
-		args
-		) -> None:
-		"""
-		"""
-		position = np.array((args[0], args[1], args[2]), dtype = np.float64)
-		speed = np.array((args[3], args[4], args[5]), dtype = np.float64)
-	
-		Framework.pieces_List.append(Ship(Framework, position, speed))
-		with(Framework.lock):
-			Framework.board_Map[int(args[0]), int(args[1]), int(args[2])] = Framework.next_ID
-			Framework.next_ID = Framework.next_ID + 1
-		
 class Logic(System):
 	"""
+	The game logic.
 	"""
 	def __init__(
 		self,
@@ -533,6 +554,7 @@ class Logic(System):
 		Queue
 		):
 		"""
+		Initialise the basic system.
 		"""
 		System.__init__(self, Framework, Queue)
 		
@@ -542,6 +564,7 @@ class Logic(System):
 		args: list = None
 		) -> None:
 		"""
+		Pass relevant messages and args onto the associated methods.
 		"""
 		if(Message.add == Msg):
 			self.add(args)
@@ -558,6 +581,7 @@ class Logic(System):
 		self,
 		) -> None:
 		"""
+		Update all pieces on the board.
 		"""
 		for piece in Framework.pieces_List:
 			self.post_Message(Message.update_Piece, piece)
@@ -567,6 +591,7 @@ class Logic(System):
 		piece
 		) -> None:
 		"""
+		Update a single piece.
 		"""
 		piece.update()
 
@@ -575,6 +600,7 @@ class Logic(System):
 		args
 		) -> None:
 		"""
+		Get piece id using board map and use it to give that piece a move order.
 		"""
 		old_x = int(args[0])
 		old_y = int(args[1])
@@ -593,6 +619,7 @@ class Logic(System):
 		args
 		) -> None:
 		"""
+		Add a new piece to the board.
 		"""
 		position = np.array((args[0], args[1], args[2]), dtype = np.float64)
 		speed = np.array((args[3], args[4], args[5]), dtype = np.float64)
