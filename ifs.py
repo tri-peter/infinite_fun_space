@@ -57,8 +57,10 @@ class Framework():
 		self.max_y = max_y
 		self.max_z = max_z
 		self.board_Map = np.zeros((max_x, max_y, max_z), dtype = int)
+		self.board_Map[:] = -1
 		self.pieces_List = list()
 		self.next_ID = 0
+		self.lock = threading.BoundedSemaphore()
 	
 class Piece:
 	"""
@@ -129,7 +131,6 @@ class Rocket(Piece):
 		) -> None:
 		"""
 		"""
-		logger.debug("rocket in flight")
 		self.new_Position()
 		for piece in Framework.pieces_List:
 			if(piece.piece_id != self.piece_id):
@@ -170,7 +171,7 @@ class Rocket(Piece):
 		logger.debug("rocket {} position {}".format(self.piece_id, self.position))
 		logger.debug("target {} position {}".format(piece.piece_id, piece.position))
 		kill = np.power((self.position[0] - piece.position[0]), 2) + np.power((self.position[1] - piece.position[1]), 2) + np.power((self.position[2] - piece.position[2]), 2) < np.power(blast_radius, 2)
-		logger.debug("kill: {}".format(kill))
+		logger.debug("target {} kill: {}".format(piece.piece_id, kill))
 		if(piece.piece_id != self.piece_id):
 			pass
 
@@ -210,7 +211,6 @@ class Radar(Piece):
 
 		for piece in self.visible_pieces:
 			if(0 < self.total_rockets):
-				logger.debug("launching rocket")
 				rocket = Rocket(
 					self.piece_id,
 					self.Framework,
@@ -232,7 +232,7 @@ class Radar(Piece):
 		Line of sight.
 		"""
 		earth_radius = 6371
-		radar_height = 0.001
+		radar_height = 0.005
 
 		radar_position = np.array(self.position, dtype = np.float64)
 		radar_position[2] = radar_position[2] + radar_height
@@ -261,8 +261,8 @@ class Ship(Piece):
 		Framework: Framework,
 		position: np.array,
 		speed: np.array,
-		acceleration: np.float64 = 0.001,
-		top_speed: np.float64 = 0.01,
+		acceleration: np.float64 = 0.0001,
+		top_speed: np.float64 = 0.001,
 		num_rockets: np.int64 = 3
 		):
 		"""
@@ -290,6 +290,10 @@ class Ship(Piece):
 		) -> None:
 		"""
 		"""
+		temp_x = int(self.position[0])
+		temp_y = int(self.position[1])
+		temp_z = int(self.position[2]) 
+
 		self.radar.update()
 
 		# do we have a destination?
@@ -307,6 +311,9 @@ class Ship(Piece):
 		self.radar.position = self.position
 		self.radar.speed = self.speed
 
+		with Framework.lock:
+			self.Framework.board_Map[temp_x, temp_y, temp_z] = -1
+			self.Framework.board_Map[int(self.position[0]), int(self.position[1]), int(self.position[2])] = self.piece_id 
 class System:
 	"""
 	"""
@@ -464,8 +471,29 @@ class Interface(System):
 		for i in range(Framework.max_x):
 			stdscr.addstr(2, 4 * i + 3, str(i))
 		for piece in Framework.pieces_List:
-			stdscr.addstr(2 * int(np.rint(piece.position[1])) + 3, 4 * int(np.rint(piece.position[0])) + 3, "X" + str(int(np.rint(piece.position[2]))))
-			#draw missiles
+			for rocket in piece.radar.rocket_list:
+				with(Framework.lock):
+					temp_x = int(rocket.position[0])
+					temp_y = int(rocket.position[1])
+					temp_z = int(rocket.position[2])
+					if(-1 == Framework.board_Map[temp_x, temp_y, temp_z]):
+						stdscr.addstr(2 * temp_y + 3, 4 * temp_x + 3, "." + str(temp_z))
+					elif(-1 == Framework.board_Map[temp_x + 1, temp_y, temp_z]):
+						temp_x = temp_x + 1
+						stdscr.addstr(2 * temp_y + 3, 4 * temp_x + 3, "." + str(temp_z))
+					elif(-1 == Framework.board_Map[temp_x - 1, temp_y, temp_z]):
+						temp_x = temp_x - 1
+						stdscr.addstr(2 * temp_y + 3, 4 * temp_x + 3, "." + str(temp_z))
+					elif(-1 == Framework.board_Map[temp_x, temp_y + 1, temp_z]):
+						temp_y = temp_y + 1
+						stdscr.addstr(2 * temp_y + 3, 4 * temp_x + 3, "." + str(temp_z))
+					elif(-1 == Framework.board_Map[temp_x, temp_y - 1, temp_z]):
+						temp_y = temp_y - 1
+						stdscr.addstr(2 * temp_y + 3, 4 * temp_x + 3, "." + str(temp_z))
+					logger.debug("rocket printed ({}, {}, {})".format(temp_x, temp_y, temp_z))
+			
+					
+			stdscr.addstr(2 * int(piece.position[1]) + 3, 4 * int(piece.position[0]) + 3, "X" + str(int(piece.position[2])))
 
 		window_size = stdscr.getmaxyx()
 		stdscr.move(window_size[0] - 1, 0)
@@ -476,9 +504,11 @@ class Interface(System):
 		) -> None:
 		"""
 		"""
-		piece_ID = Framework.board_Map[int(args[0]), int(args[1]), int(args[2])]
+		with(Framework.lock):
+			piece_ID = Framework.board_Map[int(args[0]), int(args[1]), int(args[2])]
 		destination = np.array((int(args[3]), int(args[4]), int(args[5])), dtype = int)
-		Framework.pieces_List[piece_ID].move_Order(destination)
+		if(-1 < piece_ID):
+			Framework.pieces_List[piece_ID].move_Order(destination)
 
 	def add(
 		self,
@@ -490,8 +520,9 @@ class Interface(System):
 		speed = np.array((args[3], args[4], args[5]), dtype = np.float64)
 	
 		Framework.pieces_List.append(Ship(Framework, position, speed))
-		Framework.board_Map[int(args[0]), int(args[1]), int(args[2])] = Framework.next_ID
-		Framework.next_ID = Framework.next_ID + 1
+		with(Framework.lock):
+			Framework.board_Map[int(args[0]), int(args[1]), int(args[2])] = Framework.next_ID
+			Framework.next_ID = Framework.next_ID + 1
 		
 class Logic(System):
 	"""
@@ -550,10 +581,12 @@ class Logic(System):
 		old_z = int(args[2])
 
 		new_coords = args[3:6]
-		
-		piece_ID = Framework.board_Map[old_x, old_y, old_z]
 		destination = np.array((new_coords), dtype = np.float64)
-		Framework.pieces_List[piece_ID].move_Order(destination)
+		with(Framework.lock):
+			piece_ID = Framework.board_Map[old_x, old_y, old_z]
+			piece = Framework.pieces_List[piece_ID]
+
+		piece.move_Order(destination)
 
 	def add(
 		self,
@@ -563,10 +596,10 @@ class Logic(System):
 		"""
 		position = np.array((args[0], args[1], args[2]), dtype = np.float64)
 		speed = np.array((args[3], args[4], args[5]), dtype = np.float64)
-	
-		Framework.pieces_List.append(Ship(Framework.next_ID, Framework, position, speed))
-		Framework.board_Map[int(args[0]), int(args[1]), int(args[2])] = Framework.next_ID
-		Framework.next_ID = Framework.next_ID + 1
+		with(Framework.lock):
+			Framework.pieces_List.append(Ship(Framework.next_ID, Framework, position, speed))
+			Framework.board_Map[int(args[0]), int(args[1]), int(args[2])] = Framework.next_ID
+			Framework.next_ID = Framework.next_ID + 1
 		
 if(__name__ == "__main__"):
 	Framework = Framework()
@@ -574,8 +607,7 @@ if(__name__ == "__main__"):
 	Logic = Logic(Framework, Queue)
 	Interface = Interface(Framework, Queue)
 	Message_Bus = Message_Bus(Framework, Queue, [Logic, Interface])
-	Message_Bus.post_Message(Message.add, [1, 8, 0, 0, 0, 0])
-	Message_Bus.post_Message(Message.move_Order, [1, 8, 0, 7, 2, 0])
-	Message_Bus.post_Message(Message.add, [8, 1, 0, 0, 0, 0])
+	Message_Bus.post_Message(Message.add, [1, 5, 0, 0, 0, 0])
+	Message_Bus.post_Message(Message.add, [8, 5, 0, 0, 0, 0])
 	Queue.join()
 	Interface.open_Window()
